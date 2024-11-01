@@ -23,14 +23,17 @@ $token = (Get-AzAccessToken).token
 ## [List Private Clouds](https://learn.microsoft.com/en-us/rest/api/avs/private-clouds/list?view=rest-avs-2023-09-01&tabs=HTTP)
 
 
-### example
+### Example
+
+#### List Private Clouds
 
 GET https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.AVS/privateClouds?api-version=2023-09-01
 
 So let's build this programmatically now
 
 ```powershell
-$subscriptionId = Read-host "Please enter your subscription id"
+# $subscriptionId = Read-host "Please enter your subscription id" - IF NOT Using list_sub_login.ps1 first
+$subscriptionId = (Get-AzContext).Subscription.Id
 $resourceGroupName = Read-host "Please enter your resource group name"
 $uri = "https://management.azure.com/subscriptions/" + $subscriptionId + "/resourceGroups/" + $resourceGroupName + "/providers/Microsoft.AVS/privateClouds?api-version=2023-09-01"
 
@@ -95,4 +98,105 @@ provisioningNetwork          : 192.168.50.0/25
 provisioningState            : Succeeded
 vcenterCertificateThumbprint : 24761F3CF6E142305BA4F794112624E844CF001A
 vmotionNetwork               : 192.168.49.128/25
+```
+
+#### List Clusters in Private Clouds
+
+GET https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.AVS/privateClouds/{privateCloudName}/clusters?api-version=2023-09-01
+
+So let's build this programmatically now
+
+```powershell
+# $subscriptionId = Read-host "Please enter your subscription id" - IF NOT Using list_sub_login.ps1 first
+$subscriptionId = (Get-AzContext).Subscription.Id
+$resourceGroupName = Read-host "Please enter your resource group name"
+$privateCloudName = Read-host "Please enter your private cloud name"
+$uri = "https://management.azure.com/subscriptions/" + $subscriptionId + "/resourceGroups/" + $resourceGroupName + "/providers/Microsoft.AVS/privateClouds/"+ $privateCloudName + "/clusters?api-version=2023-09-01"
+
+$headers = @{   
+'Authorization' = "Bearer $token"
+}
+
+$result = Invoke-WebRequest -Method GET -Uri $uri -Headers $headers
+$content = $result.Content
+```
+
+|There is an oddity with the Azure VMware Solution REST API, it there is only one cluster, it will return a single object, if there are more than one, it will return an array of objects. So you need to check the type of object returned and then process it accordingly.|
+
+**NB: Cluster-1 is the default name of the cluster created when the Private Cloud is created. It also case-sensitive.**
+
+```powershell
+if ("" -eq ($content | ConvertFrom-Json).value) 
+{
+    "true"
+    $uri = "https://management.azure.com/subscriptions/" + $subscriptionId + "/resourceGroups/" +$resourceGroupName + "/providers/Microsoft.AVS/privateClouds/" +$privateCloudName + "/clusters/Cluster-1?api-version=2023-09-01"
+    $headers = @{   
+    'Authorization' = "Bearer $token"
+    }
+
+    $result = Invoke-WebRequest -Method GET -Uri $uri -Headers $headers
+    $content = $result.Content
+} else {
+    write-output "Multiple Clusters"
+    write-output "Cluster-1"
+    $uri = "https://management.azure.com/subscriptions/" + $subscriptionId + "/resourceGroups/" +$resourceGroupName + "/providers/Microsoft.AVS/privateClouds/" +$privateCloudName + "/clusters/Cluster-1?api-version=2023-09-01"
+    $headers = @{   
+    'Authorization' = "Bearer $token"
+    }
+
+    $cluster1Result = Invoke-WebRequest -Method GET -Uri $uri -Headers $headers
+    $cluster1Content = $cluster1Result.Content
+
+    Write-output "Cluster-2"
+    $clusterName = ($content | ConvertFrom-Json).value.name
+    $uri = "https://management.azure.com/subscriptions/" + $subscriptionId + "/resourceGroups/" +$resourceGroupName + "/providers/Microsoft.AVS/privateClouds/" +$privateCloudName + "/clusters/" + $clusterName + "?api-version=2023-09-01"
+    $headers = @{   
+    'Authorization' = "Bearer $token"
+    }
+
+    $cluster2Result = Invoke-WebRequest -Method GET -Uri $uri -Headers $headers
+    $cluster2Content = $cluster2Result.Content
+
+    ## create custom JSON array
+    $clusterContents = "[" + $cluster1Content +","+ $cluster2Content + "]"
+
+    $content = $clusterContents
+
+}
+```
+
+Lets Extract the JSON from the result
+
+```powershell
+($content | ConvertFrom-Json)
+```
+
+To get an idea of what is possible, you can output to GM "Get-Member" to see what properties are available.
+
+```powershell
+($content | ConvertFrom-Json) | Get-Member
+```
+
+Some examples below
+```powershell
+(($content | ConvertFrom-Json)).properties
+
+clusterId         : 1
+clusterSize       : 3
+displayName       : Cluster-1
+hosts             : {esx03-r06.p02.germanywestcentral.avs.azure.com, esx03-r18.p02.germanywestcentral.avs.azure.com, esx11-r14.p02.germanywestcentral.avs.azure.com}
+provisioningState : Succeeded
+vsanDatastoreName : vsanDatastore
+
+(($content | ConvertFrom-Json)).properties.hosts
+
+esx03-r06.p02.germanywestcentral.avs.azure.com
+esx03-r18.p02.germanywestcentral.avs.azure.com
+esx11-r14.p02.germanywestcentral.avs.azure.com
+
+(($content | ConvertFrom-Json)).id
+
+/subscriptions/bd4d88c1-fc0f-482f-b57b-2f3ed541945e/resourceGroups/contoso-gwc-avs-rg/providers/Microsoft.AVS/privateClouds/contoso-gwc-avs-sddc01/clusters/Cluster-1
+
+
 ```
